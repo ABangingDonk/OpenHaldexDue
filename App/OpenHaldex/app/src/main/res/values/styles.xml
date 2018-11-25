@@ -1,0 +1,17 @@
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <style name = "CustomProgressBarHorizontal" parent = "android:Widget.ProgressBar.Horizontal">
+        <item name = "android:progressDrawable"> @drawable/custom_progress_bar_horizontal </item>
+        <item name = "android:minHeight"> 10dip </item>
+        <item name = "android:maxHeight"> 100dip </item>
+    </style>
+
+</resources>
