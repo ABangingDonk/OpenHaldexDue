@@ -37,6 +37,8 @@
 #include <due_can.h>
 #include "Timer.h"
 
+#define ARRAY_LEN(array)    ((size_t)(sizeof(array) / sizeof(array[0])))
+
 //Leave defined if you use native port, comment if using programming port
 //#define Serial SerialUSB
 
@@ -65,7 +67,7 @@ static void get_lock_data(CAN_FRAME *frame)
     switch(frame->id)
     {
         case MOTOR1_ID:
-            memcpy(frame->data.bytes, motor1_lock_data, ARRAY_DIM(motor1_lock_data));
+            memcpy(frame->data.bytes, motor1_lock_data, ARRAY_LEN(motor1_lock_data));
             break;
         case MOTOR3_ID:
             frame->data.bytes[2] = 0xfa;
@@ -87,19 +89,16 @@ static void get_lock_data(CAN_FRAME *frame)
 
 void haldex_callback(CAN_FRAME *incoming)
 {
-	if(incoming->id == HALDEX_ID)
-	{
-		Can1.sendFrame(*incoming, 7);
-		//CAN_FRAME controller_out_frame;
-		//
-		//controller_out_frame.id = CONTROLLER_ID;
-		//controller_out_frame.length = 2;
-		//controller_out_frame.extended=0;
-		//controller_out_frame.data.bytes[0] = incoming->data.bytes[0];
-		//controller_out_frame.data.bytes[1] = incoming->data.bytes[1];
-		//
-		//Can1.sendFrame(controller_out_frame);
-	}
+	Can1.sendFrame(*incoming, 7);
+	//CAN_FRAME controller_out_frame;
+	//
+	//controller_out_frame.id = CONTROLLER_ID;
+	//controller_out_frame.length = 2;
+	//controller_out_frame.extended=0;
+	//controller_out_frame.data.bytes[0] = incoming->data.bytes[0];
+	//controller_out_frame.data.bytes[1] = incoming->data.bytes[1];
+	//
+	//Can1.sendFrame(controller_out_frame);
 	#if CAN0_DEBUG
 	if(incoming->data.bytes[0])
 	{
@@ -132,19 +131,14 @@ void can1_rx_callback(CAN_FRAME *incoming)
 	}
 	else
 	{
-        switch(operating_mode)
+        if(operating_mode == NO_LOCKING && incoming->id == MOTOR1_ID)
         {
-            case NO_LOCKING:
-                if(incoming->id == MOTOR1_ID)
-                {
-                    incoming->data.bytes[3] = 0;
-                }
-                break;
-            case FULL_LOCKING:
-            case CUSTOM_LOCKING:
-                get_lock_data(incoming);
-                break;
+			incoming->data.bytes[3] = 0;
         }
+		else if(operating_mode != STOCK_LOCKING)
+		{
+			get_lock_data(incoming);
+		}
 
 		Can0.sendFrame(*incoming);
 	}
@@ -160,7 +154,6 @@ void can1_rx_callback(CAN_FRAME *incoming)
 			Serial.print(" ");
 		}
 		Serial.println();
-		Serial.println(haldex_lock_val,HEX);
 	}
     
     //CAN_FRAME haldex_test_frame;
@@ -186,7 +179,7 @@ void setup()
     Can0.begin(CAN_BPS_500K);
     Can1.begin(CAN_BPS_500K);
     
-    Can0.setRXFilter(0, HALDEX_ID, 0x7ff, false);
+    Can0.setRXFilter(0, HALDEX_ID, MASTER_ID, false);
     Can0.setCallback(0, haldex_callback);
     Can0.mailbox_set_mode(1,3);
     Can0.mailbox_set_mode(2,3);

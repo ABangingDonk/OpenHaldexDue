@@ -75,7 +75,8 @@ void setup()
      * set up a filter so that frames with other
      * IDs get dropped so that the poor little
      * UNO doesn't get swamped. */
-    CAN.init_Mask(0, 0, 0x7ff); // Bits to apply the filter to (all 11)
+    CAN.init_Mask(0, 0, 0x3ff); // Bits to apply the filter to (all 1)
+	CAN.init_Mask(1, 0, 0x3ff); // Bits to apply the filter to (all 1)
     CAN.init_Filt(0, 0, HALDEX_ID); // Ignore anything that doesn't match HALDEX_ID
 
     while (CAN_OK != CAN.begin(CAN_500KBPS))
@@ -83,7 +84,7 @@ void setup()
         delay(100);
     }
     
-    t.every(500, send_master_data); // Send data to the interceptor every 500ms
+    t.every(2000, send_master_data); // Send data to the interceptor every 500ms
     t.every(100, send_app_data);    // Send data to the app every 100ms
 }
 
@@ -96,7 +97,7 @@ void loop()
      * Loop through all at once. The app only sends when it
      * receives a frame so we shouldn't be getting stuck here
      * indefinately. */
-    while(Serial.available() > 2)
+    if(Serial.available() > 2)
     {
         uint8_t mode;
         uint8_t lock;

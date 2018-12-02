@@ -55,40 +55,44 @@ public class MainActivity extends AppCompatActivity {
         ToggleButton button = findViewById(view.getId());
         if(button.isChecked())
         {
+            bt_connected = startBT();
             if(!bt_connected)
             {
-                bt_connected = startBT();
+                button.setChecked(false);
             }
-
-            rx.postDelayed(runnable = new Runnable() {
-                @Override
-                public void run() {
-                    if(receiveData() > 0)
-                    {
-                        ProgressBar haldex_status_bar = findViewById(R.id.lock_percent_bar);
-                        TextView haldex_status_label = findViewById(R.id.lock_percent_label);
-
-                        haldex_status = in_data[0];
-                        haldex_lock = in_data[1];
-
-                        haldex_status_bar.setProgress(haldex_lock);
-                        if(haldex_status != 0)
+            else
+            {
+                rx.postDelayed(runnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        if(receiveData() > 0)
                         {
-                            haldex_status_label.setText(String.format("ERROR: 0x%1$02X", (int)haldex_status));
-                            haldex_status_bar.setBackgroundColor(0xff888888);
+                            ProgressBar haldex_status_bar = findViewById(R.id.lock_percent_bar);
+                            TextView haldex_status_label = findViewById(R.id.lock_percent_label);
+
+                            haldex_status = in_data[0];
+                            haldex_status &= 0x8;
+                            haldex_lock = in_data[1];
+
+                            haldex_status_bar.setProgress(haldex_lock);
+                            if(haldex_status != 0)
+                            {
+                                haldex_status_label.setText(String.format("ERROR: 0x%1$02X", (int)haldex_status));
+                                haldex_status_bar.setBackgroundColor(0xff888888);
+                            }
+                            else
+                            {
+                                haldex_status_label.setText(String.format("%1$02d%%", (int)haldex_lock));
+                            }
                         }
-                        else
-                        {
-                            haldex_status_label.setText(String.format("%1$02d%%", (int)haldex_lock));
-                        }
+                        rx.postDelayed(runnable, rx_delay);
                     }
-                    rx.postDelayed(runnable, rx_delay);
-                }
-            }, rx_delay);
+                }, rx_delay);
+            }
         }
         else
         {
-            if(stopBT())
+            if(bt_connected && stopBT())
             {
                 bt_connected = false;
             }
@@ -136,7 +140,15 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean startBT(){
         boolean connected = false;
-        BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        BluetoothAdapter bluetoothAdapter;
+
+        try {
+            bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+        }catch (Exception e){
+            e.printStackTrace();
+            Toast.makeText(getApplicationContext(),"Device doesn't support Bluetooth",Toast.LENGTH_SHORT).show();
+            return connected;
+        }
 
         if(bluetoothAdapter == null){
             Toast.makeText(getApplicationContext(),"Device doesn't support Bluetooth",Toast.LENGTH_SHORT).show();
@@ -156,14 +168,17 @@ public class MainActivity extends AppCompatActivity {
             return connected;
 
         } else {
-
+            boolean device_found = false;
             for (BluetoothDevice iterator : bondedDevices) {
-
-                if(iterator.getName().equals("OpenHaldex")) {
+                if(iterator.getName().equals("OpenHaldex") || iterator.getAddress().equals("20:16:10:25:56:93")) {
                     device = iterator; //device is an object of type BluetoothDevice
+                    device_found = true;
                     break;
                 }
-                return false; // We didn't find the device we're looking for
+            }
+            if(!device_found){
+                Toast.makeText(getApplicationContext(),"OpenHaldex master not found",Toast.LENGTH_SHORT).show();
+                return connected;
             }
         }
 
