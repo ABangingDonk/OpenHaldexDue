@@ -78,27 +78,21 @@ static void get_lock_data(CAN_FRAME *frame)
             frame->data.bytes[2] = 0xfe;
             break;
         case BRAKES3_ID:
+            frame->data.high = (0xa << 24) + (0xa << 8);
 			frame->data.low = frame->data.high + false_slip;
             break;
-        //case BRAKES1_ID:
-		//	frame->data.bytes[2]=0x0;
-		//	frame->data.bytes[3]=0x1;
-		//	break;
+        case BRAKES1_ID:
+			//frame->data.bytes[1] &= ~0x8;
+			frame->data.bytes[2] = 0x0;
+			frame->data.bytes[3] = 0xa;
+			break;
     }
 }
 
 void haldex_callback(CAN_FRAME *incoming)
 {
 	Can1.sendFrame(*incoming, 7);
-	//CAN_FRAME controller_out_frame;
-	//
-	//controller_out_frame.id = CONTROLLER_ID;
-	//controller_out_frame.length = 2;
-	//controller_out_frame.extended=0;
-	//controller_out_frame.data.bytes[0] = incoming->data.bytes[0];
-	//controller_out_frame.data.bytes[1] = incoming->data.bytes[1];
-	//
-	//Can1.sendFrame(controller_out_frame);
+
 	#if CAN0_DEBUG
 	if(incoming->data.bytes[0])
 	{
@@ -126,7 +120,7 @@ void can1_rx_callback(CAN_FRAME *incoming)
         }
         else
         {
-            false_slip = (0x2 << 24) + (0x2 << 8);
+            false_slip = (0x1 << 24) + (0x1 << 8);
         }
 	}
 	else
@@ -143,7 +137,7 @@ void can1_rx_callback(CAN_FRAME *incoming)
 		Can0.sendFrame(*incoming);
 	}
 #if CAN1_DEBUG
-	if(incoming->id == MASTER_ID)
+	if(incoming->id == MOTOR1_ID)
 	{
 		Serial.print("ID: 0x");
 		Serial.print(incoming->id,HEX);
@@ -155,20 +149,6 @@ void can1_rx_callback(CAN_FRAME *incoming)
 		}
 		Serial.println();
 	}
-    
-    //CAN_FRAME haldex_test_frame;
-    //
-    //haldex_test_frame.id = 0x2c0;
-    //haldex_test_frame.length = 2;
-    //haldex_test_frame.extended=0;
-    //haldex_test_frame.data.bytes[0] = 0x00;
-    //haldex_test_frame.data.bytes[1] = haldex_lock_val;
-    //
-    //Serial.println(haldex_lock_val,HEX);
-    //
-    //Can1.sendFrame(haldex_test_frame);
-    //
-    //haldex_lock_val++;
 #endif
 }
 
