@@ -3,27 +3,37 @@ package com.kong.openhaldex;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.res.AssetManager;
 import android.os.Handler;
+import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowManager;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
 
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
+import org.xmlpull.v1.XmlPullParserFactory;
+
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.lang.Integer;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements DeleteModeFragment.DialogListener {
 
     private boolean bt_connected = false;
     private BluetoothDevice device;
@@ -31,7 +41,7 @@ public class MainActivity extends AppCompatActivity {
     private OutputStream outputStream;
     private InputStream inputStream;
     private final UUID PORT_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");//Serial Port Service ID
-    private int selected_mode_button = R.id.stock_button;
+    private int selected_mode_button;
     private static char out_data[] = {0xff, 0, 0};
     private static char in_data[] = {0, 0};
     private static char haldex_lock = 0x7f;
@@ -41,6 +51,8 @@ public class MainActivity extends AppCompatActivity {
     int rx_delay = 50;
     Runnable runnable;
 
+    public ArrayList<Mode> ModeList;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -49,7 +61,195 @@ public class MainActivity extends AppCompatActivity {
         //getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         setContentView(R.layout.activity_main);
+
+        // Try to read our private XML to get our list of modes
+        try{
+            _getModes();
+        } catch (Exception e) {
+            // If something went wrong then write the builtin XML
+            _create_modesXML();
+            try {
+                // And try to read the XML modes again
+                _getModes();
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        }
+
+        // Create the mode buttons
+        _createModeButtons();
     }
+
+    public void delete_button_click(View v){
+        DeleteModeFragment deleteModeFragment = new DeleteModeFragment();
+        FragmentTransaction ft;
+
+        CharSequence[] modeNames = new CharSequence[ModeList.size()];
+        for (int i = 0; i < ModeList.size(); i++){
+            modeNames[i] = ModeList.get(i).name;
+        }
+        Bundle b = new Bundle();
+        b.putCharSequenceArray("modeNames", modeNames);
+
+        deleteModeFragment.setArguments(b);
+
+        ft = getSupportFragmentManager().beginTransaction();
+        Fragment prev = getSupportFragmentManager().findFragmentByTag("dialog");
+        if (prev != null){
+            ft.remove(prev);
+        }
+        ft.addToBackStack(null);
+
+        deleteModeFragment.show(ft, "dialog");
+    }
+
+    public void add_button_click(View v){
+        Intent intent = new Intent(this, ManageModes.class);
+        Bundle b = new Bundle();
+        b.putSerializable("modeList", ModeList);
+        intent.putExtras(b);
+        startActivityForResult(intent, 1);
+    }
+
+    public void onActivityResult(int requestCode, int resultCode, Intent data){
+        super.onActivityResult(requestCode, resultCode, data);
+        switch (requestCode){
+            case 1:
+                // Handle save
+                if (resultCode == RESULT_OK){
+                    Mode new_mode = (Mode)data.getSerializableExtra("mode");
+                    // Add new_mode to the private XML
+
+                    Toast.makeText(getApplicationContext(),String.format("'%s' added", new_mode.name),Toast.LENGTH_SHORT).show();
+                }
+                break;
+        }
+    }
+
+    @Override
+    public void onFinishEditDialog(int index) {
+        Mode deletedMode = ModeList.get(index);
+        if (!deletedMode.editable){
+            Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
+        }
+        else{
+            Toast.makeText(getApplicationContext(), String.format("Mode '%s' has been deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private View.OnClickListener modeOnClickListener = new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            mode_button_click(v);
+        }
+    };
+
+    public void mode_button_click(View view){
+        ToggleButton previous_selection = findViewById(selected_mode_button);
+        if(selected_mode_button != view.getId())
+        {
+            previous_selection.setChecked(false);
+            selected_mode_button = view.getId();
+            //out_data[1] = (char)Integer.parseInt((String)view.getTag());
+        }
+        else
+        {
+            previous_selection.setChecked(true);
+        }
+    }
+
+    private void _createModeButtons(){
+        for (Mode mode:ModeList) {
+            ToggleButton button = new ToggleButton(this);
+            button.setId(View.generateViewId());
+            button.setTextOn(mode.name);
+            button.setTextOff(mode.name);
+            button.setText(mode.name);
+            button.setMinHeight(175);
+            button.setOnClickListener(modeOnClickListener);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            button.setLayoutParams(params);
+            LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
+            mode_button_container.addView(button);
+        }
+        // Select the first mode in the list
+        LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
+        selected_mode_button = mode_button_container.getChildAt(0).getId();
+        ToggleButton button = findViewById(selected_mode_button);
+        button.setChecked(true);
+    }
+
+    private void _getModes() throws XmlPullParserException, IOException {
+        XmlPullParserFactory pullParserFactory;
+
+        pullParserFactory = XmlPullParserFactory.newInstance();
+        XmlPullParser parser = pullParserFactory.newPullParser();
+
+        InputStream inputStream = openFileInput("modes.xml");
+        parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES,false);
+        parser.setInput(inputStream, null);
+
+        ModeList = parseXML(parser);
+    }
+
+    private ArrayList<Mode> parseXML(XmlPullParser parser) throws XmlPullParserException, IOException {
+        ArrayList<Mode> ret = null;
+        int eventType = parser.getEventType();
+        Mode mode = null;
+
+        while (eventType != XmlPullParser.END_DOCUMENT){
+            String element_name;
+            switch (eventType){
+                case XmlPullParser.START_DOCUMENT:
+                    ret = new ArrayList<Mode>();
+                    break;
+                case XmlPullParser.START_TAG:
+                    element_name = parser.getName();
+                    if (element_name.equals("mode")){
+                        mode = new Mode();
+                        mode.editable = parser.getAttributeValue(null,"editable").equals("true");
+                    } else if (mode != null){
+                        if (element_name.equals("name")){
+                            mode.name = parser.nextText();
+                        } else if (element_name.equals("lockpoint")){
+                            LockPoint lockPoint = new LockPoint();
+                            lockPoint.speed=Float.parseFloat(parser.getAttributeValue(null,"speed"));
+                            lockPoint.lock=Float.parseFloat(parser.getAttributeValue(null,"lock"));
+                            lockPoint.intensity=Float.parseFloat(parser.getAttributeValue(null,"intensity"));
+                            mode.lockPoints.add(lockPoint);
+                        }
+                    }
+                    break;
+                case XmlPullParser.END_TAG:
+                    element_name = parser.getName();
+                    if (element_name.equals("mode") && mode != null){
+                        ret.add(mode);
+                        mode = null;
+                    }
+            }
+            eventType = parser.next();
+        }
+        return ret;
+    }
+
+    private void _create_modesXML(){
+        try{
+            AssetManager assetManager = getAssets();
+            InputStream input = assetManager.open("builtin_modes.xml");
+            int size = input.available();
+            byte[] buffer = new byte[size];
+            input.read(buffer);
+            input.close();
+
+            FileOutputStream outputStream = openFileOutput("modes.xml", Context.MODE_PRIVATE);
+            outputStream.write(buffer);
+            outputStream.close();
+        }catch(IOException e){
+            e.printStackTrace();
+        }
+    }
+
+
 
     public void connect_button_click(View view){
         ToggleButton button = findViewById(view.getId());
@@ -82,7 +282,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                             else
                             {
-                                haldex_status_label.setText(String.format("%1$02d%%", (int)haldex_lock));
+                                haldex_status_label.setText(String.format(Locale.ENGLISH,"%1$02d%%", (int)haldex_lock));
                             }
                         }
                         rx.postDelayed(runnable, rx_delay);
@@ -216,19 +416,5 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
         return true;
-    }
-
-    public void mode_button_click(View view){
-        ToggleButton previous_selection = findViewById(selected_mode_button);
-        if(selected_mode_button != view.getId())
-        {
-            previous_selection.setChecked(false);
-            selected_mode_button = view.getId();
-            out_data[1] = (char)Integer.parseInt((String)view.getTag());
-        }
-        else
-        {
-            previous_selection.setChecked(true);
-        }
     }
 }
