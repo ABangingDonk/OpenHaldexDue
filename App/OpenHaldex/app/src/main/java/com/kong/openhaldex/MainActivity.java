@@ -12,6 +12,7 @@ import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.view.Window;
 import android.widget.LinearLayout;
@@ -24,10 +25,14 @@ import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 import org.xmlpull.v1.XmlPullParserFactory;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Set;
@@ -63,21 +68,12 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         setContentView(R.layout.activity_main);
 
         // Try to read our private XML to get our list of modes
-        try{
-            _getModes();
-        } catch (Exception e) {
-            // If something went wrong then write the builtin XML
+        if (!_getModes()){
+            // Something went wrong so write the builtin XML
             _create_modesXML();
-            try {
-                // And try to read the XML modes again
-                _getModes();
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
+            // And try to read the XML modes again
+            _getModes();
         }
-
-        // Create the mode buttons
-        _createModeButtons();
     }
 
     public void delete_button_click(View v){
@@ -108,21 +104,33 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         Bundle b = new Bundle();
         b.putSerializable("modeList", ModeList);
         intent.putExtras(b);
-        startActivityForResult(intent, 1);
+        intent.putExtra("request_code", 0);
+        startActivityForResult(intent, 0);
     }
 
     public void onActivityResult(int requestCode, int resultCode, Intent data){
         super.onActivityResult(requestCode, resultCode, data);
         switch (requestCode){
-            case 1:
+            case 0:
                 // Handle save
                 if (resultCode == RESULT_OK){
-                    Mode new_mode = (Mode)data.getSerializableExtra("mode");
+                    Mode new_mode = (Mode)data.getSerializableExtra("new_mode");
                     // Add new_mode to the private XML
-
+                    _save_mode(new_mode);
                     Toast.makeText(getApplicationContext(),String.format("'%s' added", new_mode.name),Toast.LENGTH_SHORT).show();
                 }
                 break;
+            case 1:
+                // Handle edit
+                if (resultCode == RESULT_OK){
+                    Mode new_mode = (Mode)data.getSerializableExtra("new_mode");
+                    Mode old_mode = (Mode)data.getSerializableExtra("old_mode");
+                    // Delete the old mode first
+                    _delete_mode(old_mode.name, false);
+                    // Add new_mode to the private XML
+                    _save_mode(new_mode);
+                    Toast.makeText(getApplicationContext(),String.format("'%s' updated", new_mode.name),Toast.LENGTH_SHORT).show();
+                }
         }
     }
 
@@ -133,7 +141,49 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
         }
         else{
+            _delete_mode(deletedMode.name, true);
             Toast.makeText(getApplicationContext(), String.format("Mode '%s' has been deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void _delete_mode(String mode_name, boolean update_list){
+        try{
+            InputStream inputStream = openFileInput("modes.xml");
+            InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
+            BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
+
+            String line;
+            StringBuilder updated_modes_xml = new StringBuilder();
+
+            while ((line = bufferedReader.readLine()) != null){
+                if (line.equals("\t<mode name=\"" + mode_name + "\" editable=\"true\">")){
+                    // We've found the mode we need to delete.. so loop until we find
+                    // the closing tag and then continue.
+                    while(!line.equals("\t</mode>")){
+                        line = bufferedReader.readLine();
+                    }
+                    continue;
+                }
+                updated_modes_xml.append(line);
+                updated_modes_xml.append("\n");
+            }
+
+            FileOutputStream outputStream = openFileOutput("modes.xml", Context.MODE_PRIVATE);
+            OutputStreamWriter outputStreamWriter = new OutputStreamWriter(outputStream);
+            BufferedWriter bufferedWriter = new BufferedWriter(outputStreamWriter);
+
+            bufferedWriter.append(updated_modes_xml);
+            bufferedWriter.flush();
+
+            outputStream.close();
+            inputStream.close();
+
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+
+        if (update_list) {
+            _getModes();
         }
     }
 
@@ -141,6 +191,14 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         @Override
         public void onClick(View v) {
             mode_button_click(v);
+        }
+    };
+
+    private View.OnLongClickListener modeOnLongClickListener = new View.OnLongClickListener() {
+        @Override
+        public boolean onLongClick(View v) {
+            mode_button_long_click(v);
+            return true;
         }
     };
 
@@ -158,7 +216,25 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         }
     }
 
+    public void mode_button_long_click(View v){
+        Intent intent = new Intent(this, ManageModes.class);
+        Bundle b = new Bundle();
+        ToggleButton mode_button = (ToggleButton)v;
+
+        for (Mode mode:ModeList) {
+            if (mode.name == (mode_button.getText())){
+                b.putSerializable("existingMode", mode);
+            }
+        }
+        b.putSerializable("modeList", ModeList);
+        intent.putExtras(b);
+        intent.putExtra("request_code", 1);
+        startActivityForResult(intent, 1);
+    }
+
     private void _createModeButtons(){
+        LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
+        mode_button_container.removeAllViewsInLayout();
         for (Mode mode:ModeList) {
             ToggleButton button = new ToggleButton(this);
             button.setId(View.generateViewId());
@@ -167,29 +243,39 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             button.setText(mode.name);
             button.setMinHeight(175);
             button.setOnClickListener(modeOnClickListener);
+            button.setOnLongClickListener(modeOnLongClickListener);
+            button.setAllCaps(false);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             button.setLayoutParams(params);
-            LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
             mode_button_container.addView(button);
         }
         // Select the first mode in the list
-        LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
         selected_mode_button = mode_button_container.getChildAt(0).getId();
         ToggleButton button = findViewById(selected_mode_button);
         button.setChecked(true);
     }
 
-    private void _getModes() throws XmlPullParserException, IOException {
+    private boolean _getModes() {
         XmlPullParserFactory pullParserFactory;
 
-        pullParserFactory = XmlPullParserFactory.newInstance();
-        XmlPullParser parser = pullParserFactory.newPullParser();
+        try{
+            pullParserFactory = XmlPullParserFactory.newInstance();
+            XmlPullParser parser = pullParserFactory.newPullParser();
 
-        InputStream inputStream = openFileInput("modes.xml");
-        parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES,false);
-        parser.setInput(inputStream, null);
+            InputStream inputStream = openFileInput("modes.xml");
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES,false);
+            parser.setInput(inputStream, null);
+            ModeList = parseXML(parser);
+            inputStream.close();
+        } catch (Exception e){
+            e.printStackTrace();
+            return false;
+        }
 
-        ModeList = parseXML(parser);
+        // Now create the buttons
+        _createModeButtons();
+
+        return true;
     }
 
     private ArrayList<Mode> parseXML(XmlPullParser parser) throws XmlPullParserException, IOException {
@@ -207,11 +293,10 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     element_name = parser.getName();
                     if (element_name.equals("mode")){
                         mode = new Mode();
+                        mode.name = parser.getAttributeValue(null,"name");
                         mode.editable = parser.getAttributeValue(null,"editable").equals("true");
                     } else if (mode != null){
-                        if (element_name.equals("name")){
-                            mode.name = parser.nextText();
-                        } else if (element_name.equals("lockpoint")){
+                        if (element_name.equals("LockpointView")){
                             LockPoint lockPoint = new LockPoint();
                             lockPoint.speed=Float.parseFloat(parser.getAttributeValue(null,"speed"));
                             lockPoint.lock=Float.parseFloat(parser.getAttributeValue(null,"lock"));
@@ -249,7 +334,61 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         }
     }
 
+    private void _save_mode(Mode mode){
+        try{
+            InputStream inputStream = openFileInput("modes.xml");
+            InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
+            BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
 
+            String line;
+            StringBuilder updated_modes_xml = new StringBuilder();
+
+            while ((line = bufferedReader.readLine()) != null){
+                if (line.equals("\t<!-- ins_mark -->")){
+                    // We've found the insertion mark so add XML for the new mode here
+                    updated_modes_xml.append("\t<mode name=\"");
+                    updated_modes_xml.append(mode.name);
+                    updated_modes_xml.append("\" ");
+                    if (mode.editable){
+                        updated_modes_xml.append("editable=\"true\">\n");
+                    }
+                    else {
+                        updated_modes_xml.append("editable=\"false\">\n");
+                    }
+
+                    for (LockPoint lockPoint :
+                            mode.lockPoints) {
+                        updated_modes_xml.append("\t\t<LockpointView speed=\"");
+                        updated_modes_xml.append(lockPoint.speed);
+                        updated_modes_xml.append("\" lock=\"");
+                        updated_modes_xml.append(lockPoint.lock);
+                        updated_modes_xml.append("\" intensity=\"");
+                        updated_modes_xml.append(lockPoint.intensity);
+                        updated_modes_xml.append("\"/>\n");
+                    }
+
+                    updated_modes_xml.append("\t</mode>\n");
+                }
+                updated_modes_xml.append(line);
+                updated_modes_xml.append("\n");
+            }
+
+            FileOutputStream outputStream = openFileOutput("modes.xml", Context.MODE_PRIVATE);
+            OutputStreamWriter outputStreamWriter = new OutputStreamWriter(outputStream);
+            BufferedWriter bufferedWriter = new BufferedWriter(outputStreamWriter);
+
+            bufferedWriter.append(updated_modes_xml);
+            bufferedWriter.flush();
+
+            outputStream.close();
+            inputStream.close();
+
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+
+        _getModes();
+    }
 
     public void connect_button_click(View view){
         ToggleButton button = findViewById(view.getId());

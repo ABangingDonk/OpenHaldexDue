@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <modelist>
-    <mode editable="false">
-        <name>Stock</name>
-    </mode>
-    <mode editable="false">
-        <name>FWD</name>
-        <lockpoint speed="0" lock="0" intensity="0"/>
-    </mode>
-    <mode editable="false">
-        <name>50/50</name>
-        <lockpoint speed="0" lock="100" intensity="100"/>
-    </mode>
+	<!-- BUILTIN MODES START -->
+	<mode name="Stock" editable="false">
+	</mode>
+	<mode name="FWD" editable="false">
+		<lockpoint speed="0" lock="0" intensity="0"/>
+	</mode>
+	<mode name="50/50" editable="false">
+		<lockpoint speed="0" lock="100" intensity="100"/>
+	</mode>
+	<!-- BUILTIN MODES END -->
+
+	<!-- USER DEFINED MODES START -->
+	<!-- ins_mark -->
+	<!-- USER DEFINED MODES END -->
 </modelist>
