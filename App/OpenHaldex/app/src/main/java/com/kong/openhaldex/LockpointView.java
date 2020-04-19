@@ -5,12 +5,17 @@ import android.text.Editable;
 import android.text.Layout;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
+
+import java.util.Locale;
 
 public class LockpointView extends LinearLayout {
     public LockPoint lockPoint = new LockPoint(0,0,0);
@@ -44,20 +49,24 @@ public class LockpointView extends LinearLayout {
         inflater.inflate(R.layout.lockpoint_view, this);
     }
 
-    public void speed_on_edit(View view){
-        EditText editText = (EditText)view;
-        lockPoint.speed = Float.parseFloat(editText.getText().toString());
-    }
-
     @Override
     protected void onFinishInflate(){
         super.onFinishInflate();
 
         lockPercent = findViewById(R.id.lock_percent_textview);
-        lockPercent.setText(String.valueOf((int)lockPoint.lock));
+        lockPercent.setText(String.format(Locale.ENGLISH, "%d%%", (int)lockPoint.lock));
 
         speed = findViewById(R.id.speed_edittext);
-        speed.setHint(String.valueOf(lockPoint.speed));
+        speed.setText(String.valueOf(lockPoint.speed));
+        speed.setOnFocusChangeListener(new OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                EditText editText = (EditText)v;
+                if (hasFocus){
+                    editText.getText().clear();
+                }
+            }
+        });
         speed.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -66,22 +75,36 @@ public class LockpointView extends LinearLayout {
 
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                lockPoint.speed = Float.parseFloat(s.toString());
+                if (!s.toString().equals("")){
+                    int speed = Integer.parseInt(s.toString());
+                    if (speed > 255){
+                        lockPoint.speed = 255;
+                    }
+                    else{
+                        lockPoint.speed = speed;
+                    }
+                }
             }
 
             @Override
             public void afterTextChanged(Editable s) {
-
+                if (!s.toString().equals("")){
+                    int speed = Integer.parseInt(s.toString());
+                    if (speed > 255){
+                        s.clear();
+                        s.append("255");
+                    }
+                }
             }
         });
 
         seekBar = findViewById(R.id.lock_percent_seekbar);
-        seekBar.setProgress((int)(lockPoint.lock / 10));
+        seekBar.setProgress(lockPoint.lock / 10);
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                lockPercent.setText(String.valueOf(progress * 10));
-                lockPoint.lock = progress * 10;
+                lockPercent.setText(String.format(Locale.ENGLISH, "%d%%", (progress * 10)));
+                lockPoint.lock = (byte)(progress * 10);
             }
 
             @Override

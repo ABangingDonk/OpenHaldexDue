@@ -40,6 +40,7 @@ import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity implements DeleteModeFragment.DialogListener {
 
+    private static final String TAG = "MainActivity";
     private boolean bt_connected = false;
     private BluetoothDevice device;
     private BluetoothSocket socket;
@@ -49,12 +50,20 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     private int selected_mode_button;
     private static char out_data[] = {0xff, 0, 0};
     private static char in_data[] = {0, 0};
-    private static char haldex_lock = 0x7f;
+    private static char haldex_lock = 0;
     private static char haldex_status = 0;
+    private static int lockpoint_bitmask = 0;
+    private static boolean master_ready = true;
+    public Mode current_mode;
+    private boolean unknown_mode = false;
 
     Handler rx = new Handler();
-    int rx_delay = 50;
+    int rx_delay = 100;
     Runnable runnable;
+    Handler modeCheck = new Handler();
+    Runnable modeCheckRunnable;
+    Handler lockPointCheck = new Handler();
+    Runnable lockPointCheckRunnable;
 
     public ArrayList<Mode> ModeList;
 
@@ -122,15 +131,32 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                 break;
             case 1:
                 // Handle edit
+                Mode old_mode = (Mode)data.getSerializableExtra("old_mode");
                 if (resultCode == RESULT_OK){
                     Mode new_mode = (Mode)data.getSerializableExtra("new_mode");
-                    Mode old_mode = (Mode)data.getSerializableExtra("old_mode");
                     // Delete the old mode first
-                    _delete_mode(old_mode.name, false);
+                    _delete_mode(old_mode, false);
                     // Add new_mode to the private XML
-                    _save_mode(new_mode);
+                    if (current_mode != null && current_mode.name.equals(old_mode.name)){
+                        current_mode = new_mode;
+                        _save_mode(new_mode);
+                        master_ready = false;
+                        sendModeClear();
+                        sendData(current_mode);
+                        checkLockPoints();
+                    }
+                    else{
+                        _save_mode(new_mode);
+                    }
                     Toast.makeText(getApplicationContext(),String.format("'%s' updated", new_mode.name),Toast.LENGTH_SHORT).show();
                 }
+                else {
+                    if (current_mode != null && current_mode.name.equals(old_mode.name)){
+                        ToggleButton button = findViewById(selected_mode_button);
+                        button.setChecked(true);
+                    }
+                }
+                break;
         }
     }
 
@@ -141,12 +167,12 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
         }
         else{
-            _delete_mode(deletedMode.name, true);
+            _delete_mode(deletedMode, true);
             Toast.makeText(getApplicationContext(), String.format("Mode '%s' has been deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void _delete_mode(String mode_name, boolean update_list){
+    private void _delete_mode(Mode mode, boolean update_list){
         try{
             InputStream inputStream = openFileInput("modes.xml");
             InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
@@ -156,7 +182,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             StringBuilder updated_modes_xml = new StringBuilder();
 
             while ((line = bufferedReader.readLine()) != null){
-                if (line.equals("\t<mode name=\"" + mode_name + "\" editable=\"true\">")){
+                if (line.equals("\t<mode name=\"" + mode.name + "\" editable=\"true\">")){
                     // We've found the mode we need to delete.. so loop until we find
                     // the closing tag and then continue.
                     while(!line.equals("\t</mode>")){
@@ -185,6 +211,10 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         if (update_list) {
             _getModes();
         }
+
+        if (mode.editable){
+            unknown_mode = true;
+        }
     }
 
     private View.OnClickListener modeOnClickListener = new View.OnClickListener() {
@@ -204,16 +234,35 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
 
     public void mode_button_click(View view){
         ToggleButton previous_selection = findViewById(selected_mode_button);
-        if(selected_mode_button != view.getId())
-        {
-            previous_selection.setChecked(false);
+
+        Log.i(TAG, String.format("mode_button_click: '%s' mode selected",((ToggleButton)view).getText()));
+
+        if(selected_mode_button != view.getId() || current_mode == null) {
+            if(!unknown_mode && previous_selection.getId() != view.getId()){
+                previous_selection.setChecked(false);
+            }
             selected_mode_button = view.getId();
-            //out_data[1] = (char)Integer.parseInt((String)view.getTag());
+            ToggleButton mode_button = (ToggleButton)view;
+            for (Mode mode:ModeList) {
+                if (mode.name == (mode_button.getText())){
+                    current_mode = mode;
+                }
+            }
+            mode_button.setChecked(true);
+            if (current_mode != null && current_mode.editable && bt_connected){
+                // This must be a custom mode so we need to send lockpoints.. but only if BT is connected!
+                master_ready = false;
+                sendModeClear();
+                sendData(current_mode);
+                checkLockPoints();
+            }
         }
-        else
-        {
+        else {
+            selected_mode_button = view.getId();
             previous_selection.setChecked(true);
         }
+
+        unknown_mode = false;
     }
 
     public void mode_button_long_click(View v){
@@ -223,6 +272,10 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
 
         for (Mode mode:ModeList) {
             if (mode.name == (mode_button.getText())){
+                if (!mode.editable){
+                    Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be edited", mode.name),Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 b.putSerializable("existingMode", mode);
             }
         }
@@ -241,6 +294,10 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             button.setTextOn(mode.name);
             button.setTextOff(mode.name);
             button.setText(mode.name);
+            if (current_mode != null && current_mode.name.equals(mode.name)){
+                button.setChecked(true);
+                selected_mode_button = button.getId();
+            }
             button.setMinHeight(175);
             button.setOnClickListener(modeOnClickListener);
             button.setOnLongClickListener(modeOnLongClickListener);
@@ -250,9 +307,11 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             mode_button_container.addView(button);
         }
         // Select the first mode in the list
-        selected_mode_button = mode_button_container.getChildAt(0).getId();
-        ToggleButton button = findViewById(selected_mode_button);
-        button.setChecked(true);
+        if (current_mode == null && !unknown_mode){
+            selected_mode_button = mode_button_container.getChildAt(0).getId();
+            ToggleButton button = findViewById(selected_mode_button);
+            button.setChecked(true);
+        }
     }
 
     private boolean _getModes() {
@@ -298,9 +357,9 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     } else if (mode != null){
                         if (element_name.equals("LockpointView")){
                             LockPoint lockPoint = new LockPoint();
-                            lockPoint.speed=Float.parseFloat(parser.getAttributeValue(null,"speed"));
-                            lockPoint.lock=Float.parseFloat(parser.getAttributeValue(null,"lock"));
-                            lockPoint.intensity=Float.parseFloat(parser.getAttributeValue(null,"intensity"));
+                            lockPoint.speed=Integer.parseInt(parser.getAttributeValue(null,"speed"));
+                            lockPoint.lock=Integer.parseInt(parser.getAttributeValue(null,"lock"));
+                            lockPoint.intensity=Integer.parseInt(parser.getAttributeValue(null,"intensity"));
                             mode.lockPoints.add(lockPoint);
                         }
                     }
@@ -404,13 +463,12 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                 rx.postDelayed(runnable = new Runnable() {
                     @Override
                     public void run() {
-                        if(receiveData() > 0)
+                        if(receiveData() == APP_MSG_STATUS)
                         {
                             ProgressBar haldex_status_bar = findViewById(R.id.lock_percent_bar);
                             TextView haldex_status_label = findViewById(R.id.lock_percent_label);
 
                             haldex_status = in_data[0];
-                            haldex_status &= 0x8;
                             haldex_lock = in_data[1];
 
                             haldex_status_bar.setProgress(haldex_lock);
@@ -436,42 +494,202 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                 bt_connected = false;
             }
             rx.removeCallbacks(runnable);
+            modeCheck.removeCallbacks(modeCheckRunnable);
+            lockPointCheck.removeCallbacks(lockPointCheckRunnable);
+
         }
     }
 
+    private final int APP_MSG_MODE = 0;
+    private final int APP_MSG_STATUS = 1;
+    private final int APP_MSG_CUSTOM_DATA = 2;
+    private final int APP_MSG_CUSTOM_CTRL = 3;
+
+    private final int DATA_CTRL_CHECK_LOCKPOINTS = 0;
+    private final int DATA_CTRL_CLEAR = 1;
+    private final int DATA_CTRL_CHECK_MODE = 2;
+
+    private final int SERIAL_FRAME_START = 0xff;
+
+    boolean send_mode;
+
     private int receiveData(){
-        int rx_count = 0;
+        int message_type = -1;
+        send_mode = true;
+
         try {
-            while(inputStream.available() > 0){
-                if(inputStream.read() == 0xff){
-                    in_data[0] = (char)inputStream.read();
-                    char new_lock_val = (char)inputStream.read();
-                    in_data[1] = ((new_lock_val & 0x80) != 0) ? (char)((new_lock_val & 0x7f) * (100.0/70.0))
-                                                              : 0;
-                    rx_count += 3;
-                }
-                else
-                {
-                    rx_count++;
+            while(inputStream.available() > 5){
+                if(inputStream.read() == SERIAL_FRAME_START){
+                    message_type = inputStream.read();
+                    switch (message_type){
+                        case APP_MSG_STATUS:
+                            in_data[0] = (char)inputStream.read();
+                            in_data[1] = (char)inputStream.read();
+                            break;
+                        case APP_MSG_CUSTOM_CTRL:
+                            int message_code = inputStream.read();
+                            switch (message_code) {
+                                case DATA_CTRL_CHECK_LOCKPOINTS:
+                                    int lockpoint_check_mask;
+                                    lockpoint_check_mask = inputStream.read() | (inputStream.read() >> 8);
+                                    Log.i(TAG, String.format("receiveData: lockpoint_check_mask = 0x%x", lockpoint_check_mask));
+                                    Log.i(TAG, String.format("receiveData: lockpoint_bitmask = 0x%x", lockpoint_bitmask));
+                                    if (lockpoint_bitmask == lockpoint_check_mask) {
+                                        master_ready = true;
+                                    }
+                                    break;
+                                case DATA_CTRL_CHECK_MODE:
+                                    int interceptor_mode = inputStream.read();
+                                    if (interceptor_mode <= 2){
+                                        LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
+                                        mode_button_click(mode_button_container.getChildAt(interceptor_mode));
+                                    }
+                                    else{
+                                        Toast.makeText(getApplicationContext(), "Booted in custom mode, deselected in App but active",Toast.LENGTH_SHORT).show();
+                                        ToggleButton previous_selection = findViewById(selected_mode_button);
+                                        previous_selection.setChecked(false);
+                                        unknown_mode = true;
+                                        send_mode = false;
+                                    }
+                                    break;
+                            }
+                        default:
+                            return -1;
+                    }
                 }
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
 
-        if(rx_count > 0){
-            sendData();
+        if(send_mode){
+            sendMode();
         }
 
-        return rx_count;
+        return message_type;
     }
 
-    private void sendData(){
-        try{
-            for(int i = 0; i < out_data.length; i++)
-            {
-                outputStream.write(out_data[i]);
+    private void sendMode(){
+        final int MODE_STOCK = 0;
+        final int MODE_FWD = 1;
+        final int MODE_5050 = 2;
+        final int MODE_CUSTOM = 3;
+
+        if (current_mode != null){
+            try{
+                if (current_mode.name.equals("Stock")){
+                    outputStream.write(SERIAL_FRAME_START);
+                    outputStream.write(APP_MSG_MODE);
+                    outputStream.write(MODE_STOCK);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                }
+                else if (current_mode.name.equals("FWD")){
+                    outputStream.write(SERIAL_FRAME_START);
+                    outputStream.write(APP_MSG_MODE);
+                    outputStream.write(MODE_FWD);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                }
+                else if (current_mode.name.equals("50/50")){
+                    outputStream.write(SERIAL_FRAME_START);
+                    outputStream.write(APP_MSG_MODE);
+                    outputStream.write(MODE_5050);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                }
+                else {
+                    if (master_ready){
+                        outputStream.write(SERIAL_FRAME_START);
+                        outputStream.write(APP_MSG_MODE);
+                        outputStream.write(MODE_CUSTOM);
+                        outputStream.write(0);
+                        outputStream.write(0);
+                        outputStream.write(0);
+                    }
+                }
+            }catch (IOException e){
+                e.printStackTrace();
             }
+        }
+        else if (!unknown_mode){
+            checkInitialMode();
+        }
+    }
+
+    private void checkLockPoints(){
+        try{
+            outputStream.write(SERIAL_FRAME_START);
+            outputStream.write(APP_MSG_CUSTOM_CTRL);
+            outputStream.write(DATA_CTRL_CHECK_LOCKPOINTS);
+            outputStream.write(0);
+            outputStream.write(0);
+            outputStream.write(0);
+
+            lockPointCheck.postDelayed(lockPointCheckRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if(!master_ready){
+                        Log.i(TAG, "run: master_ready == false");
+                        lockPointCheck.postDelayed(lockPointCheckRunnable, rx_delay);
+                    }
+                }
+            }, rx_delay);
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+    }
+
+    private void checkInitialMode(){
+        try{
+            outputStream.write(SERIAL_FRAME_START);
+            outputStream.write(APP_MSG_CUSTOM_CTRL);
+            outputStream.write(DATA_CTRL_CHECK_MODE);
+            outputStream.write(0);
+            outputStream.write(0);
+            outputStream.write(0);
+
+            modeCheck.postDelayed(modeCheckRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if(current_mode == null && !unknown_mode){
+                        modeCheck.postDelayed(modeCheckRunnable, rx_delay);
+                    }
+                }
+            }, rx_delay);
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+    }
+
+    private void sendData(Mode mode){
+        try{
+            lockpoint_bitmask = 0;
+            for (int i = 0; i < mode.lockPoints.size(); i++) {
+                outputStream.write(SERIAL_FRAME_START);
+                outputStream.write(APP_MSG_CUSTOM_DATA);
+                outputStream.write(i);
+                outputStream.write((char)mode.lockPoints.get(i).speed);
+                outputStream.write((char)mode.lockPoints.get(i).lock);
+                outputStream.write((char)mode.lockPoints.get(i).intensity);
+                lockpoint_bitmask |= 1 << i;
+            }
+        }catch (IOException e){
+            e.printStackTrace();
+        }
+    }
+
+    private void sendModeClear(){
+        try{
+            outputStream.write(SERIAL_FRAME_START);
+            outputStream.write(APP_MSG_CUSTOM_CTRL);
+            outputStream.write(DATA_CTRL_CLEAR);
+            outputStream.write(0);
+            outputStream.write(0);
+            outputStream.write(0);
         }catch (IOException e){
             e.printStackTrace();
         }

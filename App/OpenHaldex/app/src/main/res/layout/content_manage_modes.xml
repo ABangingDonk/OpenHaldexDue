@@ -54,7 +54,8 @@
                             android:layout_height="wrap_content"
                             android:onClick="add_lockpoint_button_click"
                             android:text="+"
-                            android:textSize="20sp" />
+                            android:textSize="20sp"
+                            android:focusable="false"/>
 
                         <Button
                             android:id="@+id/remove_lockpoint_button"
@@ -62,7 +63,8 @@
                             android:layout_height="wrap_content"
                             android:onClick="remove_lockpoint_button_click"
                             android:text="-"
-                            android:textSize="20sp" />
+                            android:textSize="20sp"
+                            android:focusable="false"/>
                     </LinearLayout>
                 </LinearLayout>
             </ScrollView>

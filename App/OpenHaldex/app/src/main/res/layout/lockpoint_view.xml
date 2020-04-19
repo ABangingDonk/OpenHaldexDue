@@ -13,7 +13,7 @@
     <EditText
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_weight="0.075"
+        android:layout_weight="0.1"
         android:lines="1"
         android:inputType="number"
         android:textSize="12sp"
@@ -25,11 +25,12 @@
         android:layout_height="match_parent"
         android:max="10"
         android:progress="3"
-        android:layout_weight="0.75"/>
+        android:layout_weight="0.75"
+        android:focusable="false"/>
     <TextView
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_weight="0.1"
+        android:layout_weight="0.075"
         android:textSize="12sp"
         android:id="@+id/lock_percent_textview"
         android:gravity="center"/>

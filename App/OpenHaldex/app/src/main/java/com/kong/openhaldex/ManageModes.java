@@ -6,6 +6,7 @@ import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -53,10 +54,37 @@ public class ManageModes extends AppCompatActivity {
         ModeList = (ArrayList<Mode>)(getIntent().getSerializableExtra("modeList"));
     }
 
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()){
+            case android.R.id.home:
+                onBackPressed();
+                break;
+        }
+        return true;
+    }
+
+    @Override
+    public void onBackPressed()
+    {
+        // Send the inputs back to MainActivity
+        Intent intent = new Intent();
+        Bundle b = new Bundle();
+        b.putSerializable("old_mode", existingMode);
+        intent.putExtras(b);
+        setResult(RESULT_CANCELED, intent);
+        finish();
+        super.onBackPressed();
+    }
+
     public void add_lockpoint_button_click(View view){
-        LockpointView lockpointView = new LockpointView(this);
-        lockpointView.onFinishInflate();
-        lockpoint_container.addView(lockpointView, lockpoint_container.getChildCount() - 1);
+        if (lockpoint_container.getChildCount() > 10) {
+            Toast.makeText(getApplicationContext(), "10 points maximum",Toast.LENGTH_SHORT).show();
+        } else{
+            LockpointView lockpointView = new LockpointView(this);
+            lockpointView.onFinishInflate();
+            lockpoint_container.addView(lockpointView, lockpoint_container.getChildCount() - 1);
+        }
     }
 
     public void remove_lockpoint_button_click(View view){
