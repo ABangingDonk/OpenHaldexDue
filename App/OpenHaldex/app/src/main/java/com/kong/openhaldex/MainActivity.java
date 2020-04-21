@@ -38,7 +38,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
-public class MainActivity extends AppCompatActivity implements DeleteModeFragment.DialogListener {
+public class MainActivity extends AppCompatActivity implements DeleteModeFragment.DialogListener, SetMinPedalFragment.DialogListener {
 
     private static final String TAG = "MainActivity";
     private boolean bt_connected = false;
@@ -48,17 +48,18 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     private InputStream inputStream;
     private final UUID PORT_UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");//Serial Port Service ID
     private int selected_mode_button;
-    private static char out_data[] = {0xff, 0, 0};
-    private static char in_data[] = {0, 0};
     private static char haldex_lock = 0;
     private static char haldex_status = 0;
+    private static char target_lock = 0;
+    private static char vehicle_speed = 0;
     private static int lockpoint_bitmask = 0;
+    private static int pedal_threshold = 0;
     private static boolean master_ready = true;
     public Mode current_mode;
     private boolean unknown_mode = false;
 
     Handler rx = new Handler();
-    int rx_delay = 100;
+    int rx_delay = 50;
     Runnable runnable;
     Handler modeCheck = new Handler();
     Runnable modeCheckRunnable;
@@ -95,17 +96,63 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         }
         Bundle b = new Bundle();
         b.putCharSequenceArray("modeNames", modeNames);
+        b.putInt("returnID", DELETE_MODE_DIALOG);
 
         deleteModeFragment.setArguments(b);
 
         ft = getSupportFragmentManager().beginTransaction();
-        Fragment prev = getSupportFragmentManager().findFragmentByTag("dialog");
+        Fragment prev = getSupportFragmentManager().findFragmentByTag("deleteDialog");
         if (prev != null){
             ft.remove(prev);
         }
         ft.addToBackStack(null);
 
-        deleteModeFragment.show(ft, "dialog");
+        deleteModeFragment.show(ft, "deleteDialog");
+    }
+
+    public void min_ped_button_click(View v){
+        SetMinPedalFragment minPedalFragment = new SetMinPedalFragment();
+        FragmentTransaction ft;
+
+        Bundle b = new Bundle();
+        b.putInt("pedalThreshold", pedal_threshold);
+        b.putInt("returnID", SET_MIN_PEDAL_DIALOG);
+
+        minPedalFragment.setArguments(b);
+
+        ft = getSupportFragmentManager().beginTransaction();
+        Fragment prev = getSupportFragmentManager().findFragmentByTag("pedalDialog");
+        if (prev != null){
+            ft.remove(prev);
+        }
+        ft.addToBackStack(null);
+
+        minPedalFragment.show(ft, "pedalDialog");
+    }
+
+    public final int DELETE_MODE_DIALOG = 0;
+    public final int SET_MIN_PEDAL_DIALOG = 1;
+
+    public void onFinishEditDialog(int source, int retval) {
+        switch (source) {
+            case DELETE_MODE_DIALOG:
+                Mode deletedMode = ModeList.get(retval);
+                if (!deletedMode.editable) {
+                    Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be deleted", deletedMode.name), Toast.LENGTH_SHORT).show();
+                } else {
+                    _delete_mode(deletedMode, true);
+                    Toast.makeText(getApplicationContext(), String.format("Mode '%s' has been deleted", deletedMode.name), Toast.LENGTH_SHORT).show();
+                }
+                break;
+            case SET_MIN_PEDAL_DIALOG:
+                if (retval > 100 || retval < 0){
+                    Toast.makeText(getApplicationContext(), "Pick a value between 0 and 100", Toast.LENGTH_SHORT).show();
+                }else{
+                    pedal_threshold = retval;
+                    Log.i(TAG, String.format("onFinishEditDialog: new pedal threshold: %d%%",retval));
+                }
+                break;
+        }
     }
 
     public void add_button_click(View v){
@@ -126,7 +173,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     Mode new_mode = (Mode)data.getSerializableExtra("new_mode");
                     // Add new_mode to the private XML
                     _save_mode(new_mode);
-                    Toast.makeText(getApplicationContext(),String.format("'%s' added", new_mode.name),Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getApplicationContext(), String.format("'%s' added", new_mode.name), Toast.LENGTH_SHORT).show();
                 }
                 break;
             case 1:
@@ -148,7 +195,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     else{
                         _save_mode(new_mode);
                     }
-                    Toast.makeText(getApplicationContext(),String.format("'%s' updated", new_mode.name),Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getApplicationContext(), String.format("'%s' updated", new_mode.name), Toast.LENGTH_SHORT).show();
                 }
                 else {
                     if (current_mode != null && current_mode.name.equals(old_mode.name)){
@@ -157,18 +204,6 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     }
                 }
                 break;
-        }
-    }
-
-    @Override
-    public void onFinishEditDialog(int index) {
-        Mode deletedMode = ModeList.get(index);
-        if (!deletedMode.editable){
-            Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
-        }
-        else{
-            _delete_mode(deletedMode, true);
-            Toast.makeText(getApplicationContext(), String.format("Mode '%s' has been deleted", deletedMode.name),Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -235,7 +270,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     public void mode_button_click(View view){
         ToggleButton previous_selection = findViewById(selected_mode_button);
 
-        Log.i(TAG, String.format("mode_button_click: '%s' mode selected",((ToggleButton)view).getText()));
+        Log.i(TAG, String.format("mode_button_click: '%s' mode selected", ((ToggleButton)view).getText()));
 
         if(selected_mode_button != view.getId() || current_mode == null) {
             if(!unknown_mode && previous_selection.getId() != view.getId()){
@@ -273,7 +308,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
         for (Mode mode:ModeList) {
             if (mode.name == (mode_button.getText())){
                 if (!mode.editable){
-                    Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be edited", mode.name),Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getApplicationContext(), String.format("Mode '%s' cannot be edited", mode.name), Toast.LENGTH_SHORT).show();
                     return;
                 }
                 b.putSerializable("existingMode", mode);
@@ -467,20 +502,21 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                         {
                             ProgressBar haldex_status_bar = findViewById(R.id.lock_percent_bar);
                             TextView haldex_status_label = findViewById(R.id.lock_percent_label);
-
-                            haldex_status = in_data[0];
-                            haldex_lock = in_data[1];
+                            TextView target_lock_label = findViewById(R.id.lock_target_label);
+                            TextView vehicle_speed_label = findViewById(R.id.vehicle_speed_label);
 
                             haldex_status_bar.setProgress(haldex_lock);
                             if(haldex_status != 0)
                             {
-                                haldex_status_label.setText(String.format("ERROR: 0x%1$02X", (int)haldex_status));
+                                haldex_status_label.setText(String.format("ERROR: 0x%02X", (int)haldex_status));
                                 haldex_status_bar.setBackgroundColor(0xff888888);
                             }
                             else
                             {
-                                haldex_status_label.setText(String.format(Locale.ENGLISH,"%1$02d%%", (int)haldex_lock));
+                                haldex_status_label.setText(String.format(Locale.ENGLISH,"Actual: %02d%%", (int)haldex_lock));
                             }
+                            target_lock_label.setText(String.format(Locale.ENGLISH, "Target: %02d%%",(int)target_lock));
+                            vehicle_speed_label.setText(String.format(Locale.ENGLISH, "%dKPH", (int)vehicle_speed));
                         }
                         rx.postDelayed(runnable, rx_delay);
                     }
@@ -523,8 +559,10 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     message_type = inputStream.read();
                     switch (message_type){
                         case APP_MSG_STATUS:
-                            in_data[0] = (char)inputStream.read();
-                            in_data[1] = (char)inputStream.read();
+                            haldex_status = (char)inputStream.read();
+                            haldex_lock = (char)inputStream.read();
+                            target_lock = (char)inputStream.read();
+                            vehicle_speed = (char)inputStream.read();
                             break;
                         case APP_MSG_CUSTOM_CTRL:
                             int message_code = inputStream.read();
@@ -532,14 +570,13 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                                 case DATA_CTRL_CHECK_LOCKPOINTS:
                                     int lockpoint_check_mask;
                                     lockpoint_check_mask = inputStream.read() | (inputStream.read() >> 8);
-                                    Log.i(TAG, String.format("receiveData: lockpoint_check_mask = 0x%x", lockpoint_check_mask));
-                                    Log.i(TAG, String.format("receiveData: lockpoint_bitmask = 0x%x", lockpoint_bitmask));
                                     if (lockpoint_bitmask == lockpoint_check_mask) {
                                         master_ready = true;
                                     }
                                     break;
                                 case DATA_CTRL_CHECK_MODE:
                                     int interceptor_mode = inputStream.read();
+                                    pedal_threshold = inputStream.read();
                                     if (interceptor_mode <= 2){
                                         LinearLayout mode_button_container = findViewById(R.id.mode_button_container);
                                         mode_button_click(mode_button_container.getChildAt(interceptor_mode));
@@ -551,6 +588,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                                         unknown_mode = true;
                                         send_mode = false;
                                     }
+                                    Toast.makeText(getApplicationContext(), String.format(Locale.ENGLISH, "Pedal threshold for Haldex activation set to %d%%", pedal_threshold),Toast.LENGTH_SHORT).show();
                                     break;
                             }
                         default:
@@ -581,7 +619,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     outputStream.write(SERIAL_FRAME_START);
                     outputStream.write(APP_MSG_MODE);
                     outputStream.write(MODE_STOCK);
-                    outputStream.write(0);
+                    outputStream.write(pedal_threshold);
                     outputStream.write(0);
                     outputStream.write(0);
                 }
@@ -589,7 +627,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     outputStream.write(SERIAL_FRAME_START);
                     outputStream.write(APP_MSG_MODE);
                     outputStream.write(MODE_FWD);
-                    outputStream.write(0);
+                    outputStream.write(pedal_threshold);
                     outputStream.write(0);
                     outputStream.write(0);
                 }
@@ -597,7 +635,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     outputStream.write(SERIAL_FRAME_START);
                     outputStream.write(APP_MSG_MODE);
                     outputStream.write(MODE_5050);
-                    outputStream.write(0);
+                    outputStream.write(pedal_threshold);
                     outputStream.write(0);
                     outputStream.write(0);
                 }
@@ -606,7 +644,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                         outputStream.write(SERIAL_FRAME_START);
                         outputStream.write(APP_MSG_MODE);
                         outputStream.write(MODE_CUSTOM);
-                        outputStream.write(0);
+                        outputStream.write(pedal_threshold);
                         outputStream.write(0);
                         outputStream.write(0);
                     }

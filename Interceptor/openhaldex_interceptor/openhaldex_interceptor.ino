@@ -48,8 +48,10 @@
 #define BRAKES1_ID                0x1A0
 #define BRAKES3_ID                0x4A0
 #define MOTOR1_ID                 0x280
+#define MOTOR2_ID                 0x288
 #define MOTOR3_ID                 0x380
 #define MOTOR6_ID                 0x488
+#define INTERCEPTOR_INFO_ID       0x7fb
 #define INTERCEPTOR_DATA_CTRL_ID  0x7fc
 #define MASTER_MODE_ID            0x7fd
 #define MASTER_DATA_CTRL_ID       0x7fe
@@ -64,8 +66,8 @@
 #define DATA_CTRL_CLEAR             1
 #define DATA_CTRL_CHECK_MODE        2
 
-#define CAN0_DEBUG      1
-#define CAN1_DEBUG      1
+#define CAN0_DEBUG      0
+#define CAN1_DEBUG      0
 #define STATE_DEBUG     0
 
 #define NUM_LOCK_POINTS 10
@@ -78,35 +80,99 @@ typedef struct lockpoint{
 
 typedef struct PersistentConfig{
     uint8_t mode;
+    double ped_threshold;
     lockpoint lockpoints[NUM_LOCK_POINTS];
 }PersistentConfig;
 
 static PersistentConfig persistent_config;
-static uint32_t false_slip = (0x1 << 24) + (0x1 << 8);
-static const uint8_t motor1_lock_data[] = { 0x0, 0xf0, 0x20, 0x4e, 0xf0, 0xf0, 0x20, 0xf0 };
 DueFlashStorage dueFlashStorage;
 static uint16_t lockpoint_rx = 0;
+static uint8_t lockpoint_count = 0;
 Timer t;
+static uint8_t vehicle_speed = 0;
+static double lock_target = 0;
+static double ped_value = 0;
 
+#if STATE_DEBUG
+static char s[64];
+#endif
+
+static uint8_t get_lock_target_adjusted(uint8_t value)
+{
+    if (persistent_config.mode == MODE_5050)
+    {
+        return ped_value > persistent_config.ped_threshold ? value : 0;
+    }
+    else
+    {
+        // Findout which lockpoints we're between in terms of speed
+        lockpoint lp_lower = persistent_config.lockpoints[0];
+        lockpoint lp_upper = persistent_config.lockpoints[lockpoint_count - 1];
+        int i;
+        for (i = 0; i < lockpoint_count; i++)
+        {
+            if (vehicle_speed < persistent_config.lockpoints[i].speed)
+            {
+                lp_upper = persistent_config.lockpoints[i];
+                lp_lower = persistent_config.lockpoints[(i == 0) ? 0 : i - 1];
+                break;
+            }
+        }
+        if (i == lockpoint_count)
+        {
+            lp_lower = lp_upper;
+        }
+        
+        if (vehicle_speed == lp_lower.speed)
+        {
+            lp_upper = lp_lower;
+        }
+        
+        double inter = 1;
+        if (vehicle_speed != lp_lower.speed && vehicle_speed < lp_upper.speed)
+        {
+            inter = (double)(lp_upper.speed - lp_lower.speed) / (double)(vehicle_speed - lp_lower.speed);            
+        }
+        
+        double target = 0;
+        if (ped_value > persistent_config.ped_threshold)
+        {
+            target = (double)(lp_lower.lock + ((lp_upper.lock - lp_lower.lock)) / inter);
+        }
+        
+        lock_target = target;
+        
+        return value * (target / 100);
+    }
+}
 
 static void get_lock_data(CAN_FRAME *frame)
 {   
+    uint8_t adjusted_slip;
     switch(frame->id)
     {
         case MOTOR1_ID:
-            memcpy(frame->data.bytes, motor1_lock_data, ARRAY_LEN(motor1_lock_data));
+            frame->data.bytes[0] = 0;
+            frame->data.bytes[1] = get_lock_target_adjusted(0xf0);
+            frame->data.bytes[2] = 0x20;
+            frame->data.bytes[3] = get_lock_target_adjusted(0x4e);
+            frame->data.bytes[4] = get_lock_target_adjusted(0xf0);
+            frame->data.bytes[5] = get_lock_target_adjusted(0xf0);
+            frame->data.bytes[6] = 0x20;
+            frame->data.bytes[7] = get_lock_target_adjusted(0xf0);
             break;
         case MOTOR3_ID:
-            frame->data.bytes[2] = 0xfa;
-            frame->data.bytes[7] = 0xfe;
+            frame->data.bytes[2] = get_lock_target_adjusted(0xfa);
+            frame->data.bytes[7] = get_lock_target_adjusted(0xfe);
             break;
         case MOTOR6_ID:
-            frame->data.bytes[1] = 0xfe;
-            frame->data.bytes[2] = 0xfe;
+            frame->data.bytes[1] = get_lock_target_adjusted(0xfe);
+            frame->data.bytes[2] = get_lock_target_adjusted(0xfe);
             break;
         case BRAKES3_ID:
+            adjusted_slip = get_lock_target_adjusted(0xff);
             frame->data.high = (0xa << 24) + (0xa << 8);
-            frame->data.low = frame->data.high + false_slip;
+            frame->data.low = frame->data.high + (adjusted_slip << 16) + adjusted_slip;
             break;
         case BRAKES1_ID:
             //frame->data.bytes[1] &= ~0x8;
@@ -125,13 +191,7 @@ void update_eeprom(void* context)
         byte new_data[sizeof(persistent_config)];
         memcpy(new_data, &persistent_config, sizeof(persistent_config));
         dueFlashStorage.write(4, new_data, sizeof(new_data));
-        Serial.println("persistent_config changed, saving to flash");
     }
-    #if STATE_DEBUG
-    Serial.print("Mode: ");
-    Serial.println(persistent_config.mode);
-    
-    #endif
 }
 
 void haldex_callback(CAN_FRAME *incoming)
@@ -154,6 +214,17 @@ void haldex_callback(CAN_FRAME *incoming)
     #endif
 }
 
+static void send_interceptor_info(void)
+{
+    CAN_FRAME rsp;
+    rsp.id = INTERCEPTOR_INFO_ID;
+    rsp.extended = false;
+    rsp.data.bytes[0] = lock_target;
+    rsp.data.bytes[1] = vehicle_speed;
+    rsp.length = 2;
+    Can1.sendFrame(rsp, 7);
+}
+
 void can1_rx_callback(CAN_FRAME *incoming)
 {
     uint32_t id = incoming->id;
@@ -162,6 +233,21 @@ void can1_rx_callback(CAN_FRAME *incoming)
     {
         // We'll get this periodically from the master to tell us which mode we should be in.
         persistent_config.mode = incoming->data.bytes[0];
+        persistent_config.ped_threshold = incoming->data.bytes[1];
+        #if STATE_DEBUG
+        sprintf(s, "Master sent ped_threshold %0.2f%%", persistent_config.ped_threshold);
+        Serial.println(s);
+        #endif
+        if (incoming->data.bytes[0] == MODE_5050)
+        {
+            lock_target = ped_value > persistent_config.ped_threshold ? 100 : 0;
+        }
+        else if (incoming->data.bytes[0] == MODE_FWD)
+        {
+            lock_target = 0;
+        }
+        
+        send_interceptor_info();
     }
     else if (id == MASTER_DATA_ID)
     {
@@ -178,6 +264,9 @@ void can1_rx_callback(CAN_FRAME *incoming)
             
             // Set the bit for this lockpoint to indicate we've received it
             lockpoint_rx |= (1 << lockpoint_index);
+            
+            // Stash the number of lockpoints to avoid having to calculate it later
+            lockpoint_count++;
         }
     }
     else if (id == MASTER_DATA_CTRL_ID)
@@ -218,6 +307,7 @@ void can1_rx_callback(CAN_FRAME *incoming)
             {
                 // We've been told to clear - so clear the lockpoints and bitfield
                 lockpoint_rx = 0;
+                lockpoint_count = 0;
                 memset(persistent_config.lockpoints, 0, sizeof(persistent_config.lockpoints));
                 break;
             }
@@ -226,7 +316,13 @@ void can1_rx_callback(CAN_FRAME *incoming)
                 // Send the bitfield value to say which lockpoints we've received
                 rsp.data.bytes[0] = DATA_CTRL_CHECK_MODE;
                 rsp.data.bytes[1] = persistent_config.mode;
-                rsp.length = 2;
+                rsp.data.bytes[2] = persistent_config.ped_threshold;
+                #if STATE_DEBUG
+                sprintf(s, "Sent ped_threshold to master %0.2f%%", persistent_config.ped_threshold);
+                Serial.println(s);
+                #endif
+                
+                rsp.length = 3;
                 Can1.sendFrame(rsp, 7);
                 #if CAN1_DEBUG
                     if(1)//incoming->id == MOTOR1_ID)
@@ -256,11 +352,26 @@ void can1_rx_callback(CAN_FRAME *incoming)
     else
     {
         // Anything which has come from the car.. i.e. everything except Haldex and Master.
-        if(persistent_config.mode == MODE_FWD && incoming->id == MOTOR1_ID)
+        switch(incoming->id)
         {
-            incoming->data.bytes[3] = 0;
+            case MOTOR1_ID:
+                ped_value = incoming->data.bytes[5] * 0.4;
+                #if STATE_DEBUG
+                sprintf(s, "Car sent ped_value %0.2f%%", ped_value);
+                Serial.println(s);
+                #endif
+                
+                if (persistent_config.mode == MODE_FWD)
+                {
+                    memset(&incoming->data, 0, incoming->length);
+                }
+                break;
+            case MOTOR2_ID:
+                vehicle_speed = (uint8_t)((incoming->data.bytes[3] * 100 * 128) / 10000);
+                break;
         }
-        else if(persistent_config.mode == MODE_5050)
+
+        if(persistent_config.mode == MODE_5050 || persistent_config.mode == MODE_CUSTOM)
         {
             get_lock_data(incoming);
         }
@@ -328,23 +439,9 @@ void setup()
     
     if (dueFlashStorage.read(0) != 0xff)
     {
-        Serial.println(dueFlashStorage.read(0));
         // We have saved config - so load it...
         byte *b = dueFlashStorage.readAddress(4);
         memcpy(&persistent_config, b, sizeof(persistent_config));
-        #if STATE_DEBUG
-        Serial.println("Found persistent config");
-        Serial.print("Mode: ");
-        Serial.println(persistent_config.mode);
-        for (int i = 0; i < NUM_LOCK_POINTS; i++)
-        {
-            char s[256];
-            sprintf(s, "Lockpoint[%d]:", i);
-            Serial.println(s);
-            sprintf(s, "speed=%d, lock=%d, intensity=%d", persistent_config.lockpoints[i].speed, persistent_config.lockpoints[i].lock, persistent_config.lockpoints[i].intensity);
-            Serial.println(s);
-        }
-        #endif
     }
     else
     {

@@ -12,4 +12,5 @@
     <string name="title_activity_manage_modes">Manage Locking Modes</string>
     <string name="add_mode_save">Save</string>
     <string name="speed">KPH</string>
+    <string name="set_min_pedal">Min pedal</string>
 </resources>

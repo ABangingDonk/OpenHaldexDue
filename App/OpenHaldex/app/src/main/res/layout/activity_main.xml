@@ -30,19 +30,68 @@
             android:indeterminateOnly="false"
             android:longClickable="false"
             android:theme="@style/ThemeOverlay.AppCompat.Dark"/>
-
-        <TextView
-            android:id="@+id/lock_percent_label"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="0.25"
-            android:clickable="false"
-            android:textAlignment="center"
-            android:theme="@style/ThemeOverlay.AppCompat.Dark"
-            app:autoSizeTextType="uniform"
-            app:autoSizeMinTextSize="12sp"
-            app:autoSizeMaxTextSize="100sp"
-            app:autoSizeStepGranularity="2sp"/>
+            android:orientation="horizontal"
+            android:theme="@style/ThemeOverlay.AppCompat.Dark">
+            <TextView
+                android:id="@+id/lock_percent_label"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.5"
+                android:clickable="false"
+                android:textAlignment="center"
+                android:theme="@style/ThemeOverlay.AppCompat.Dark"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="12sp"
+                app:autoSizeMaxTextSize="100sp"
+                app:autoSizeStepGranularity="2sp"/>
+            <TextView
+                android:id="@+id/lock_target_label"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.5"
+                android:clickable="false"
+                android:textAlignment="center"
+                android:theme="@style/ThemeOverlay.AppCompat.Dark"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="12sp"
+                app:autoSizeMaxTextSize="100sp"
+                app:autoSizeStepGranularity="2sp"/>
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.25"
+            android:orientation="horizontal"
+            android:theme="@style/ThemeOverlay.AppCompat.Dark">
+            <TextView
+                android:id="@+id/vehicle_speed_label"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.5"
+                android:clickable="false"
+                android:textAlignment="center"
+                android:theme="@style/ThemeOverlay.AppCompat.Dark"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="12sp"
+                app:autoSizeMaxTextSize="100sp"
+                app:autoSizeStepGranularity="2sp"/>
+            <TextView
+                android:id="@+id/intensity_label"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.5"
+                android:clickable="false"
+                android:textAlignment="center"
+                android:theme="@style/ThemeOverlay.AppCompat.Dark"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="12sp"
+                app:autoSizeMaxTextSize="100sp"
+                app:autoSizeStepGranularity="2sp"/>
+        </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -67,12 +116,19 @@
                 android:onClick="add_button_click"
                 android:text="@string/add_mode_button"
                 android:theme="@style/ThemeOverlay.AppCompat.Dark" />
-
+            <Button
+                android:id="@+id/set_ped_threshold_button"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.25"
+                android:onClick="min_ped_button_click"
+                android:text="@string/set_min_pedal"
+                android:theme="@style/ThemeOverlay.AppCompat.Dark" />
             <ToggleButton
                 android:id="@+id/connect_button"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="0.50"
+                android:layout_weight="0.25"
                 android:onClick="connect_button_click"
                 android:textOff="@string/connect_button_off"
                 android:textOn="@string/connect_button_on"

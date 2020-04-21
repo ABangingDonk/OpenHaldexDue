@@ -17,7 +17,7 @@ public class DeleteModeFragment extends DialogFragment  {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         DialogListener listener = (DialogListener)getActivity();
-                        listener.onFinishEditDialog(which);
+                        listener.onFinishEditDialog(getArguments().getInt("returnID"), which);
                     }
                 });
         // Create the AlertDialog object and return it
@@ -25,6 +25,6 @@ public class DeleteModeFragment extends DialogFragment  {
     }
 
     public interface DialogListener{
-        void onFinishEditDialog(int index);
+        void onFinishEditDialog(int source, int index);
     }
 }

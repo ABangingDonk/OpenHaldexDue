@@ -29,6 +29,7 @@ public class ManageModes extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setTitle("Add new mode");
         setContentView(R.layout.activity_manage_modes);
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
