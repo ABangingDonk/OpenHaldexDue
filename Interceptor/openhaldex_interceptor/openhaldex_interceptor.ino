@@ -80,7 +80,7 @@ typedef struct lockpoint{
 
 typedef struct PersistentConfig{
     uint8_t mode;
-    double ped_threshold;
+    float ped_threshold;
     lockpoint lockpoints[NUM_LOCK_POINTS];
 }PersistentConfig;
 
@@ -90,57 +90,82 @@ static uint16_t lockpoint_rx = 0;
 static uint8_t lockpoint_count = 0;
 Timer t;
 static uint8_t vehicle_speed = 0;
-static double lock_target = 0;
-static double ped_value = 0;
+static float lock_target = 0;
+static float ped_value = 0;
 
 #if STATE_DEBUG
-static char s[64];
+static char s[128];
 #endif
 
-static uint8_t get_lock_target_adjusted(uint8_t value)
+static float get_lock_target_adjustment(void)
 {
+    float target = 0;
+    
+    /* Find out which lockpoints we're between in terms of speed..
+     * Look for the lockpoint above our current speed (lp_upper) */
+    lockpoint lp_lower = persistent_config.lockpoints[0];
+    lockpoint lp_upper = persistent_config.lockpoints[lockpoint_count - 1];
+
+    for (int i = 0; i < lockpoint_count; i++)
+    {
+        if (vehicle_speed <= persistent_config.lockpoints[i].speed)
+        {
+            lp_upper = persistent_config.lockpoints[i];
+            lp_lower = persistent_config.lockpoints[(i == 0) ? 0 : i - 1];
+            break;
+        }
+    }
+    
+    /* Get the easy cases out the way first... */
+    if (vehicle_speed <= lp_lower.speed)
+    {
+        return lp_lower.lock;
+    }
+    if (vehicle_speed >= lp_upper.speed)
+    {
+        return lp_upper.lock;
+    }
+        
+    /* If locking at all... */
+    if (ped_value > persistent_config.ped_threshold || persistent_config.ped_threshold == 0)
+    {
+        /* Need to interpolate */
+        float inter = (float)(lp_upper.speed - lp_lower.speed) / (float)(vehicle_speed - lp_lower.speed);
+
+        target = lp_lower.lock + ((float)(lp_upper.lock - lp_lower.lock) / inter);
+        #if STATE_DEBUG
+        sprintf(s, "lp_upper:%d@%d lp_lower:%d@%d speed:%d target=%0.2f", 
+                lp_upper.lock, lp_upper.speed, lp_lower.lock, lp_lower.speed, vehicle_speed, target);
+        Serial.println(s);
+        #endif
+    }
+    /* Else leave target at its initial value of 0. */
+
+    return target;
+}
+
+static uint8_t get_lock_target_adjusted_value(uint8_t value)
+{    
     if (persistent_config.mode == MODE_5050)
     {
-        return ped_value > persistent_config.ped_threshold ? value : 0;
+        if (ped_value > persistent_config.ped_threshold || persistent_config.ped_threshold == 0)
+        {
+            return value;
+        }
+        
+        return 0;
     }
     else
     {
-        // Findout which lockpoints we're between in terms of speed
-        lockpoint lp_lower = persistent_config.lockpoints[0];
-        lockpoint lp_upper = persistent_config.lockpoints[lockpoint_count - 1];
-        int i;
-        for (i = 0; i < lockpoint_count; i++)
-        {
-            if (vehicle_speed < persistent_config.lockpoints[i].speed)
-            {
-                lp_upper = persistent_config.lockpoints[i];
-                lp_lower = persistent_config.lockpoints[(i == 0) ? 0 : i - 1];
-                break;
-            }
-        }
-        if (i == lockpoint_count)
-        {
-            lp_lower = lp_upper;
-        }
-        
-        if (vehicle_speed == lp_lower.speed)
-        {
-            lp_upper = lp_lower;
-        }
-        
-        double inter = 1;
-        if (vehicle_speed != lp_lower.speed && vehicle_speed < lp_upper.speed)
-        {
-            inter = (double)(lp_upper.speed - lp_lower.speed) / (double)(vehicle_speed - lp_lower.speed);            
-        }
-        
-        double target = 0;
-        if (ped_value > persistent_config.ped_threshold)
-        {
-            target = (double)(lp_lower.lock + ((lp_upper.lock - lp_lower.lock)) / inter);
-        }
-        
+        float target = get_lock_target_adjustment();
         lock_target = target;
+        
+        /*
+         * Hackery to get the response closer to the target... we are trying to control the
+         * Haldex as if it's linear.. but it's not. In future, I'd like to implement some sort
+         * of feedback loop to trim the calculation being made here but this will do for now.
+         */
+        target = (target / 2) + 20;
         
         return value * (target / 100);
     }
@@ -153,24 +178,24 @@ static void get_lock_data(CAN_FRAME *frame)
     {
         case MOTOR1_ID:
             frame->data.bytes[0] = 0;
-            frame->data.bytes[1] = get_lock_target_adjusted(0xf0);
+            frame->data.bytes[1] = get_lock_target_adjusted_value(0xf0);
             frame->data.bytes[2] = 0x20;
-            frame->data.bytes[3] = get_lock_target_adjusted(0x4e);
-            frame->data.bytes[4] = get_lock_target_adjusted(0xf0);
-            frame->data.bytes[5] = get_lock_target_adjusted(0xf0);
+            frame->data.bytes[3] = get_lock_target_adjusted_value(0x4e);
+            frame->data.bytes[4] = get_lock_target_adjusted_value(0xf0);
+            frame->data.bytes[5] = get_lock_target_adjusted_value(0xf0);
             frame->data.bytes[6] = 0x20;
-            frame->data.bytes[7] = get_lock_target_adjusted(0xf0);
+            frame->data.bytes[7] = get_lock_target_adjusted_value(0xf0);
             break;
         case MOTOR3_ID:
-            frame->data.bytes[2] = get_lock_target_adjusted(0xfa);
-            frame->data.bytes[7] = get_lock_target_adjusted(0xfe);
+            frame->data.bytes[2] = get_lock_target_adjusted_value(0xfa);
+            frame->data.bytes[7] = get_lock_target_adjusted_value(0xfe);
             break;
         case MOTOR6_ID:
-            frame->data.bytes[1] = get_lock_target_adjusted(0xfe);
-            frame->data.bytes[2] = get_lock_target_adjusted(0xfe);
+            frame->data.bytes[1] = get_lock_target_adjusted_value(0xfe);
+            frame->data.bytes[2] = get_lock_target_adjusted_value(0xfe);
             break;
         case BRAKES3_ID:
-            adjusted_slip = get_lock_target_adjusted(0xff);
+            adjusted_slip = get_lock_target_adjusted_value(0xff);
             frame->data.high = (0xa << 24) + (0xa << 8);
             frame->data.low = frame->data.high + (adjusted_slip << 16) + adjusted_slip;
             break;
@@ -234,13 +259,17 @@ void can1_rx_callback(CAN_FRAME *incoming)
         // We'll get this periodically from the master to tell us which mode we should be in.
         persistent_config.mode = incoming->data.bytes[0];
         persistent_config.ped_threshold = incoming->data.bytes[1];
-        #if STATE_DEBUG
-        sprintf(s, "Master sent ped_threshold %0.2f%%", persistent_config.ped_threshold);
-        Serial.println(s);
-        #endif
+
         if (incoming->data.bytes[0] == MODE_5050)
         {
-            lock_target = ped_value > persistent_config.ped_threshold ? 100 : 0;
+            if (ped_value > persistent_config.ped_threshold || persistent_config.ped_threshold == 0)
+            {
+                lock_target = 100;
+            }
+            else
+            {
+                lock_target = 0;
+            }
         }
         else if (incoming->data.bytes[0] == MODE_FWD)
         {
@@ -317,10 +346,6 @@ void can1_rx_callback(CAN_FRAME *incoming)
                 rsp.data.bytes[0] = DATA_CTRL_CHECK_MODE;
                 rsp.data.bytes[1] = persistent_config.mode;
                 rsp.data.bytes[2] = persistent_config.ped_threshold;
-                #if STATE_DEBUG
-                sprintf(s, "Sent ped_threshold to master %0.2f%%", persistent_config.ped_threshold);
-                Serial.println(s);
-                #endif
                 
                 rsp.length = 3;
                 Can1.sendFrame(rsp, 7);
@@ -356,10 +381,6 @@ void can1_rx_callback(CAN_FRAME *incoming)
         {
             case MOTOR1_ID:
                 ped_value = incoming->data.bytes[5] * 0.4;
-                #if STATE_DEBUG
-                sprintf(s, "Car sent ped_value %0.2f%%", ped_value);
-                Serial.println(s);
-                #endif
                 
                 if (persistent_config.mode == MODE_FWD)
                 {

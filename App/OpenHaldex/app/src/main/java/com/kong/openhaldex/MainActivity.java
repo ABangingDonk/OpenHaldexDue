@@ -53,10 +53,11 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     private static char target_lock = 0;
     private static char vehicle_speed = 0;
     private static int lockpoint_bitmask = 0;
+    private static int lockpoint_check_mask = 0;
     private static int pedal_threshold = 0;
-    private static boolean master_ready = true;
     public Mode current_mode;
     private boolean unknown_mode = false;
+    private static boolean custom_ready = false;
 
     Handler rx = new Handler();
     int rx_delay = 50;
@@ -65,6 +66,8 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     Runnable modeCheckRunnable;
     Handler lockPointCheck = new Handler();
     Runnable lockPointCheckRunnable;
+    Handler sendData = new Handler();
+    Runnable sendDataRunnable;
 
     public ArrayList<Mode> ModeList;
 
@@ -187,10 +190,8 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     if (current_mode != null && current_mode.name.equals(old_mode.name)){
                         current_mode = new_mode;
                         _save_mode(new_mode);
-                        master_ready = false;
                         sendModeClear();
                         sendData(current_mode);
-                        checkLockPoints();
                     }
                     else{
                         _save_mode(new_mode);
@@ -270,8 +271,6 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     public void mode_button_click(View view){
         ToggleButton previous_selection = findViewById(selected_mode_button);
 
-        Log.i(TAG, String.format("mode_button_click: '%s' mode selected", ((ToggleButton)view).getText()));
-
         if(selected_mode_button != view.getId() || current_mode == null) {
             if(!unknown_mode && previous_selection.getId() != view.getId()){
                 previous_selection.setChecked(false);
@@ -286,10 +285,8 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             mode_button.setChecked(true);
             if (current_mode != null && current_mode.editable && bt_connected){
                 // This must be a custom mode so we need to send lockpoints.. but only if BT is connected!
-                master_ready = false;
                 sendModeClear();
                 sendData(current_mode);
-                checkLockPoints();
             }
         }
         else {
@@ -515,7 +512,12 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                             {
                                 haldex_status_label.setText(String.format(Locale.ENGLISH,"Actual: %02d%%", (int)haldex_lock));
                             }
-                            target_lock_label.setText(String.format(Locale.ENGLISH, "Target: %02d%%",(int)target_lock));
+                            if(current_mode == null || current_mode.name.equals("Stock")){
+                                target_lock_label.setText("");
+                            }
+                            else{
+                                target_lock_label.setText(String.format(Locale.ENGLISH, "Target: %02d%%",(int)target_lock));
+                            }
                             vehicle_speed_label.setText(String.format(Locale.ENGLISH, "%dKPH", (int)vehicle_speed));
                         }
                         rx.postDelayed(runnable, rx_delay);
@@ -532,7 +534,6 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             rx.removeCallbacks(runnable);
             modeCheck.removeCallbacks(modeCheckRunnable);
             lockPointCheck.removeCallbacks(lockPointCheckRunnable);
-
         }
     }
 
@@ -547,11 +548,9 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
 
     private final int SERIAL_FRAME_START = 0xff;
 
-    boolean send_mode;
-
     private int receiveData(){
         int message_type = -1;
-        send_mode = true;
+        boolean send_mode = false;
 
         try {
             while(inputStream.available() > 5){
@@ -560,19 +559,17 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     switch (message_type){
                         case APP_MSG_STATUS:
                             haldex_status = (char)inputStream.read();
-                            haldex_lock = (char)inputStream.read();
+                            haldex_lock = (char)((inputStream.read() & 0x7f) * 100 / 72);
                             target_lock = (char)inputStream.read();
                             vehicle_speed = (char)inputStream.read();
+                            send_mode = true;
                             break;
                         case APP_MSG_CUSTOM_CTRL:
                             int message_code = inputStream.read();
                             switch (message_code) {
                                 case DATA_CTRL_CHECK_LOCKPOINTS:
-                                    int lockpoint_check_mask;
                                     lockpoint_check_mask = inputStream.read() | (inputStream.read() >> 8);
-                                    if (lockpoint_bitmask == lockpoint_check_mask) {
-                                        master_ready = true;
-                                    }
+                                    custom_ready = lockpoint_check_mask == lockpoint_bitmask;
                                     break;
                                 case DATA_CTRL_CHECK_MODE:
                                     int interceptor_mode = inputStream.read();
@@ -586,7 +583,6 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                                         ToggleButton previous_selection = findViewById(selected_mode_button);
                                         previous_selection.setChecked(false);
                                         unknown_mode = true;
-                                        send_mode = false;
                                     }
                                     Toast.makeText(getApplicationContext(), String.format(Locale.ENGLISH, "Pedal threshold for Haldex activation set to %d%%", pedal_threshold),Toast.LENGTH_SHORT).show();
                                     break;
@@ -640,7 +636,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
                     outputStream.write(0);
                 }
                 else {
-                    if (master_ready){
+                    if (custom_ready){
                         outputStream.write(SERIAL_FRAME_START);
                         outputStream.write(APP_MSG_MODE);
                         outputStream.write(MODE_CUSTOM);
@@ -659,65 +655,76 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
     }
 
     private void checkLockPoints(){
-        try{
-            outputStream.write(SERIAL_FRAME_START);
-            outputStream.write(APP_MSG_CUSTOM_CTRL);
-            outputStream.write(DATA_CTRL_CHECK_LOCKPOINTS);
-            outputStream.write(0);
-            outputStream.write(0);
-            outputStream.write(0);
+        lockPointCheck.postDelayed(lockPointCheckRunnable = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    outputStream.write(SERIAL_FRAME_START);
+                    outputStream.write(APP_MSG_CUSTOM_CTRL);
+                    outputStream.write(DATA_CTRL_CHECK_LOCKPOINTS);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                    outputStream.write(0);
+                }catch (IOException e){
+                    e.printStackTrace();
+                }
+            }
+        }, 100);
+    }
 
-            lockPointCheck.postDelayed(lockPointCheckRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    if(!master_ready){
-                        Log.i(TAG, "run: master_ready == false");
-                        lockPointCheck.postDelayed(lockPointCheckRunnable, rx_delay);
+    private void sendData(final Mode mode){
+        custom_ready = false;
+        sendData.postDelayed(sendDataRunnable = new Runnable() {
+            int retries = 3;
+            @Override
+            public void run() {
+                if(retries-- != 0 && !custom_ready){
+                    try{
+                        for (int i = 0; i < mode.lockPoints.size(); i++) {
+                            outputStream.write(SERIAL_FRAME_START);
+                            outputStream.write(APP_MSG_CUSTOM_DATA);
+                            outputStream.write(i);
+                            outputStream.write((char)mode.lockPoints.get(i).speed);
+                            outputStream.write((char)mode.lockPoints.get(i).lock);
+                            outputStream.write((char)mode.lockPoints.get(i).intensity);
+                            lockpoint_bitmask |= 1 << i;
+                        }
+                        checkLockPoints();
+                        sendData.postDelayed(sendDataRunnable, 500);
+                    }catch (IOException e){
+                        e.printStackTrace();
                     }
                 }
-            }, rx_delay);
-        }catch (IOException e){
-            e.printStackTrace();
-        }
+                else if (custom_ready){
+                    sendMode();
+                }
+                else {
+                    Toast.makeText(getApplicationContext(), "Failed setting custom mode!!", Toast.LENGTH_SHORT).show();
+                }
+            }
+        }, 0);
     }
 
     private void checkInitialMode(){
-        try{
-            outputStream.write(SERIAL_FRAME_START);
-            outputStream.write(APP_MSG_CUSTOM_CTRL);
-            outputStream.write(DATA_CTRL_CHECK_MODE);
-            outputStream.write(0);
-            outputStream.write(0);
-            outputStream.write(0);
-
-            modeCheck.postDelayed(modeCheckRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    if(current_mode == null && !unknown_mode){
-                        modeCheck.postDelayed(modeCheckRunnable, rx_delay);
+        modeCheck.postDelayed(modeCheckRunnable = new Runnable() {
+            int retries = 3;
+            @Override
+            public void run() {
+                if(retries-- != 0 && current_mode == null && !unknown_mode){
+                    try{
+                        outputStream.write(SERIAL_FRAME_START);
+                        outputStream.write(APP_MSG_CUSTOM_CTRL);
+                        outputStream.write(DATA_CTRL_CHECK_MODE);
+                        outputStream.write(0);
+                        outputStream.write(0);
+                        outputStream.write(0);
+                        modeCheck.postDelayed(modeCheckRunnable, 500);
+                    }catch (IOException e){
+                        e.printStackTrace();
                     }
                 }
-            }, rx_delay);
-        }catch (IOException e){
-            e.printStackTrace();
-        }
-    }
-
-    private void sendData(Mode mode){
-        try{
-            lockpoint_bitmask = 0;
-            for (int i = 0; i < mode.lockPoints.size(); i++) {
-                outputStream.write(SERIAL_FRAME_START);
-                outputStream.write(APP_MSG_CUSTOM_DATA);
-                outputStream.write(i);
-                outputStream.write((char)mode.lockPoints.get(i).speed);
-                outputStream.write((char)mode.lockPoints.get(i).lock);
-                outputStream.write((char)mode.lockPoints.get(i).intensity);
-                lockpoint_bitmask |= 1 << i;
             }
-        }catch (IOException e){
-            e.printStackTrace();
-        }
+        }, 0);
     }
 
     private void sendModeClear(){
@@ -728,6 +735,7 @@ public class MainActivity extends AppCompatActivity implements DeleteModeFragmen
             outputStream.write(0);
             outputStream.write(0);
             outputStream.write(0);
+            lockpoint_bitmask = 0;
         }catch (IOException e){
             e.printStackTrace();
         }
