@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal">
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="0.075"
+        android:textSize="12sp"
+        android:text="@string/speed"
+        android:gravity="center"/>
+    <EditText
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="0.1"
+        android:lines="1"
+        android:inputType="number"
+        android:textSize="12sp"
+        android:id="@+id/speed_edittext"/>
+    <SeekBar
+        android:id="@+id/lock_percent_seekbar"
+        style="@style/Widget.AppCompat.SeekBar.Discrete"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:max="10"
+        android:progress="3"
+        android:layout_weight="0.75"
+        android:focusable="false"/>
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="0.075"
+        android:textSize="12sp"
+        android:id="@+id/lock_percent_textview"
+        android:gravity="center"/>
+</merge>
