@@ -4,6 +4,8 @@
 ## Brief
 Gain control over the [Gen 1 Haldex](https://www.awdwiki.com/en/haldex/#haldex_generation_I__1998_2001 "Gen 1 Haldex") equipped to Quattro and 4Motion vehicles based on the Mk. 4 VW Golf platform (8N Audi TT, 8L Audi A3, 1J VW Golf, etc.)
 
+Installation notes here are for a Mk1 Audi TT.
+
 ## App notes
 ### Features added in v2.0
 - Custom modes (up to 10 data points)
